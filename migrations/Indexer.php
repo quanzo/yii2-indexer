@@ -27,6 +27,8 @@ class Indexer extends Migration {
 			'title' => $this->string(250)->notNull()->defaultValue(''),
 			'content' => $this->text(),
 			'orig_content' => $this->text(),
+			'snippet' => $this->text(),
+			'attrs' => $this->string(250)->notNull()->defaultValue(''),
 			'change_date' => $this->timestamp(),
 			'ttl' => $this->timestamp()->defaultValue(null),
         ];

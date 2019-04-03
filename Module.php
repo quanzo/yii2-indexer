@@ -10,6 +10,7 @@ use \yii\helpers\Url;
 class Module extends \yii\base\Module
 {
     const EVENT_BEFORE_INDEX = 'beforIndexed';
+    const EVENT_BEFORE_SEARCH = 'beforSearch';
 
     public $ttl = 86400;
     public $exclude; // роуты в которых запрещено использование. Можно применять символы ? и *
@@ -22,6 +23,8 @@ class Module extends \yii\base\Module
     ];
     public $fullpageMode = false;
     public $defaultPageSize = 15;
+    public $defaultSnippetSize = 300;
+    public $enableHashtags = true; // обрабатывать теги #
 
     /**
      * {@inheritdoc}
@@ -58,7 +61,7 @@ class Module extends \yii\base\Module
 
     public function setRemoveWords(array $words)
     {
-        $this->_removeWords = array_merge($this->_removeWords, $words);
+        $this->_removeWords = $words;
     }
 
     public function getRemoveWords()
@@ -66,6 +69,12 @@ class Module extends \yii\base\Module
         return $this->_removeWords;
     }
 
+    /**
+     * Обработка события \yii\web\View::EVENT_AFTER_RENDER
+     *
+     * @param [type] $event
+     * @return void
+     */
     public function onAfterRender($event)
     {
         //$event->viewFile;$event->params;$output;$isValid = true;
@@ -90,24 +99,38 @@ class Module extends \yii\base\Module
             $view = Yii::$app->view;
             $title = $view instanceof yii\web\View ? $view->title : '';
             $this->refresh($this->url(), $title, $event->params['content']);
-        }
+            if ($this->enableHashtags) {
+                $event->output = $this->processHashtags($event->output);
+            }
+        }        
     } // end onAfterRender
 
+    /**
+     * Обработка события
+     *
+     * @param [type] $event
+     * @return void
+     */
     public function onAfterPrepareResponse($event)
     {
         $ifValid = $this->ifPossible();
-        if ($ifValid) {
-            $response = $event->sender;
+        $response = $event->sender;
+        if ($ifValid) {            
             if ($response->stream === null) { // отдача контента, а не файла
                 $view = Yii::$app->view;
                 $title = $view instanceof yii\web\View ? $view->title : '';
                 $this->refresh($this->url(), $title, $response->content);
+                if ($this->enableHashtags) { // отдача контента, а не файла
+                    $response->content = $this->processHashtags($response->content);
+                }
             }
         }
+        
     } // end onAfterPrepareResponse
 
     /**
      * Подготовка поискового контента перед сохранением в базу.
+     * Удаляются теги и лишние символы. Текст приводится к нижнему регистру.
      *
      * @param string $content
      * @return string
@@ -118,26 +141,28 @@ class Module extends \yii\base\Module
             mb_strtolower(
                 trim(
                     str_replace(
-                        ["\x0B", "\0", "\r", "\n", "\t", '.', ',', ';', ':', '?', '!', '(', ')', '[', ']', '#', '{', '}', '"', "'", '`', '|', '      ', '     ', '    ', '   ', '  '],
+                        ["\x0B", "\0", "\r", "\n", "\t", '.', ',', ';', ':', '?', '!', '(', ')', '[', ']', '{', '}', '"', "'", '`', '|', '      ', '     ', '    ', '   ', '  '],
                         ' ',
                         $this->stripTags(
                             str_replace(['>'], ['> '], $content)
                         )
                     )
                 )
-            )
+            ),
+            $this->_removeWords
         );
         return $buff;
     } // end prepareContent
 
     /**
      * Подготовка сниппета. Для вывода в результатах поиска.
+     * Удаляются теги, переводы строки, двойные пробелы и т.п.
      *
      * @param string  $content
      * @param integer $count
      * @return string
      */
-    public function prepareSnippet($content, $count = 300)
+    public function prepareSnippet($content, $count = 300, $searchStr = false)
     {
         $buff = trim(
             str_replace(
@@ -147,7 +172,7 @@ class Module extends \yii\base\Module
                     str_replace(
                         ['>', "\r", "\t", '</'],
                         ['> ', "\n", ' ', "\n</"],
-                        $content
+                        $this->stripTags($content)
                     )
                 )
             )
@@ -157,8 +182,36 @@ class Module extends \yii\base\Module
             ["\n", "\n", "\n", "\n", "\n", "\n"],
             $buff
         );
-        return mb_substr($buff, 0, $count);
+
+        return $this->textFragment($buff, $count, $searchStr);
     }
+
+    /**
+     * Возвращает из текста фрагмент определенной длинны
+     *
+     * @param string $content
+     * @param integer $count
+     * @param boolean|string $searchStr
+     * @return string
+     */
+    public function textFragment($content, $count = 300, $searchStr = false) {
+        if ($searchStr && $count) {
+            // найдем первое вхождение
+            $ss_pos = mb_strpos($content, $searchStr);
+            if ($ss_pos !== false) {
+                $pp_count = floor($count / 2);
+                $start = $ss_pos - $pp_count;
+                if ($start < 0) {
+                    $start = 0;
+                }
+                return mb_substr($content, $start, $count);
+            }
+        }
+        if ($count>0) {
+            return mb_substr($content, 0, $count);
+        }
+        return $content;
+    } // end textFragment
 
     /**
      * Подготовка поисковой строки
@@ -171,7 +224,7 @@ class Module extends \yii\base\Module
         $buff = mb_strtolower(
             trim(
                 str_replace(
-                    ["\x0B", "\0", "\r", "\n", "\t", '.', ',', ';', ':', '?', '!', '[', ']', '#', '{', '}', "'", '`', '|', '      ', '     ', '    ', '   ', '  '],
+                    ["\x0B", "\0", "\r", "\n", "\t", '.', ',', ';', ':', '?', '!', '[', ']', '{', '}', "'", '`', '|', '      ', '     ', '    ', '   ', '  '],
                     ' ',
                     strip_tags(
                         str_replace(['>'], ['> '], $content)
@@ -213,6 +266,8 @@ class Module extends \yii\base\Module
             $result->title = $this->prepareContent($notPreparedTitle);
             $result->orig_content = $this->saveOrigContent ? $notPrepareContent : '';
             $result->content = $this->prepareContent($notPrepareContent);
+            $result->snippet = $this->prepareSnippet($notPrepareContent, false);
+            $result->attrs = '';
             $result->ttl = date('Y-m-d H:i:s', $timestamp + $this->ttl);
             $result->change_date = date('Y-m-d H:i:s', $timestamp);
 
@@ -233,11 +288,25 @@ class Module extends \yii\base\Module
      * @param string $url
      * @return \x51\yii2\modules\indexer\models\Indexer
      */
-    public function getIndexContent($url)
+    public function getIndex($url)
     {
         $query = Indexer::find();
         return $query->where(['url' => $url])->one();
     } // end get
+
+    /**
+     * Помечает результат индексирования, как устаревший
+     *
+     * @param string $url
+     * @return void
+     */
+    public function markOld($url) {
+        $rec = $this->getIndex($url);
+        if ($rec) {
+            $rec->ttl = date('Y-m-d H:i:s', time() - 1);
+            $rec->save();
+        }
+    }
 
     /**
      * Поиск
@@ -251,19 +320,27 @@ class Module extends \yii\base\Module
     public function search($text, $perpage = false, $page = 1, &$count = false)
     {
         $query = Indexer::find();
-        $searchStr = $this->prepareSearchStr($text);
+
+        // beforeSearch
+        $event = new \x51\yii2\modules\indexer\events\BeforeSearchEvent();
+        $event->module = $this;
+        $event->origSearchStr = $text;
+        $event->preparedSearchStr = $this->prepareSearchStr($text);
+        $this->trigger(self::EVENT_BEFORE_SEARCH, $event);
+
+        //$searchStr = $this->prepareSearchStr($text);
         $page = intval($page);
         if ($page < 1) {
             $page = 1;
         }
 
         if (Yii::$app->db->driverName === 'mysql') {
-            $match = 'MATCH(title, content) AGAINST("' . $searchStr . '" IN BOOLEAN MODE)';
+            $match = 'MATCH(title, content) AGAINST("' . $event->preparedSearchStr . '" IN BOOLEAN MODE)';
             $query->select(['*', $match . ' AS score'])
                 ->where($match)
                 ->orderBy(['score' => SORT_DESC]);
         } else {
-            $likeStr = str_replace(' ', '%', $searchStr);
+            $likeStr = str_replace(' ', '%', $event->preparedSearchStr);
             $query->select(['*'])->where(
                 [
                     'or',
@@ -276,15 +353,15 @@ class Module extends \yii\base\Module
             if ($count === false) {
                 $count = $query->count();
             }
-            $pages = floor($count/$perpage)+(fmod($count, $perpage) > 0 ? 1 : 0);
-            if ($page>$pages) {
+            $pages = floor($count / $perpage) + (fmod($count, $perpage) > 0 ? 1 : 0);
+            if ($page > $pages) {
                 $page = $pages;
-            } 
+            }
             $query->limit($perpage)
                 ->offset(($page - 1) * $perpage);
         }
         $result = $query->all();
-        return $result;        
+        return $result;
     }
 
     /**
@@ -317,15 +394,59 @@ class Module extends \yii\base\Module
      * @param string $content
      * @return void
      */
-    public function removeWords($content)
+    public function removeWords($content, array $words = [])
     {
-        if ($this->_removeWords) {
-            foreach ($this->_removeWords as $word) {
+        if ($words) {
+            foreach ($words as $word) {
                 $content = preg_replace('/\s' . $word . '([\s\.,?!])/imu', '$1', $content);
             }
         }
         return $content;
     }
+
+    /**
+     * Очистить контент от тегов
+     *
+     * @param string $content
+     * @return string
+     */
+    public function stripTags($content)
+    {
+        return strip_tags(
+            preg_replace([
+                '/<script[^>]*>.*?<\/script>/is',
+                '/<style[^>]*>.*?<\/style>/is',
+            ], '', $content)
+        );
+    }
+
+    /**
+     * Заменяет хештеги на ссылки на поиск
+     *
+     * @param string $content
+     * @return string
+     */
+    public function processHashtags($content)
+    {
+        $mask = '/#([^\b#@\s]+)/';
+        $hashtagUrlPattern = Url::to(['/'.$this->id . '/default/index', 'search' => '#hashtag']);
+        
+        // первое - найти хештеги в контенте без html (для того, чтобы исключить якоря)
+        $arMatches = [];
+        $arHashtags = [];
+        if (preg_match_all($mask, $this->stripTags($content), $arMatches, PREG_PATTERN_ORDER)) {
+			$arHashtags = array_unique($arMatches[1]);
+        }
+        // 2 - заменить хештеги на ссылку
+        if ($arHashtags) {
+            $arReplaceParts = [];
+            foreach ($arHashtags as $ht) {
+                $arReplaceParts['#'.$ht] = '<a target="_blank" href="' . str_replace('%23hashtag', urlencode(strip_tags(trim('#'.$ht))), $hashtagUrlPattern) . '" class="hashtag">#' . trim($ht) . '</a> ';
+            }
+            return strtr($content, $arReplaceParts);
+        }
+        return $content;
+    } // end processTags
 
     /**
      * Формирует url для базы данных
@@ -382,22 +503,8 @@ class Module extends \yii\base\Module
             }
         }
         return false;
-    }
+    } // end ifPossible
 
-    /**
-     * Очистить контент от тегов
-     *
-     * @param string $content
-     * @return string
-     */
-    protected function stripTags($content)
-    {
-        return strip_tags(
-            preg_replace([
-                '/<script[^>]*>.*?<\/script>/is',
-                '/<style[^>]*>.*?<\/style>/is',
-            ], '', $content)
-        );
-    }
+    
 
 } // end class

@@ -49,7 +49,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     }                    
                     echo '</a>';
                     echo '<div class="snippet">';
-                    echo $module->prepareSnippet($element->orig_content).'...';
+                    echo $module->prepareSnippet($element->orig_content, $module->defaultSnippetSize, $SEARCH).'...';
                     echo '<a href="'.$module->actualUrl($element->url).'" target="_blank" class="more">';
                     echo 'Подробнее';
                     echo '</a>';

@@ -31,9 +31,9 @@ class Indexer extends \yii\db\ActiveRecord
     {
         return [
             [['content', 'title'], 'required'],
-            [['content', 'orig_content', 'title', 'orig_title'], 'string'],
+            [['content', 'orig_content', 'title', 'orig_title', 'attrs', 'snippet'], 'string'],
             [['change_date', 'ttl'], 'safe'],
-            [['url'], 'string', 'max' => 250],
+            [['url', 'attrs'], 'string', 'max' => 250],
         ];
     }
 
@@ -43,14 +43,16 @@ class Indexer extends \yii\db\ActiveRecord
     public function attributeLabels()
     {
         return [
-            'id' => Yii::t('modules/indexer', 'ID'),
-            'url' => Yii::t('modules/indexer', 'Url'),
-            'title' => Yii::t('modules/indexer', 'Title'),
-            'orig_title' => Yii::t('modules/indexer', 'Title (orig)'),
-            'content' => Yii::t('modules/indexer', 'Content'),
-            'orig_content' => Yii::t('modules/indexer', 'Content (orig)'),
-            'change_date' => Yii::t('modules/indexer', 'Change Date'),
-            'ttl' => Yii::t('modules/indexer', 'Ttl'),
+            'id' => Yii::t('module/indexer', 'ID'),
+            'url' => Yii::t('module/indexer', 'Url'),
+            'title' => Yii::t('module/indexer', 'Title'),
+            'orig_title' => Yii::t('module/indexer', 'Title (orig)'),
+            'content' => Yii::t('module/indexer', 'Content'),
+            'orig_content' => Yii::t('module/indexer', 'Content (orig)'),
+            'snippet' => Yii::t('module/indexer', 'Snippet'),
+            'attrs' => Yii::t('module/indexer', 'Attributes'),
+            'change_date' => Yii::t('module/indexer', 'Change Date'),
+            'ttl' => Yii::t('module/indexer', 'Ttl'),
         ];
     }
 
