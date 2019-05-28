@@ -33,14 +33,19 @@ $config = [
     'modules' => [
         'indexer' => [
             'class' => 'x51\yii2\modules\indexer\Module',
-            // 'fullpageMode' => false, // сохранять всю страницу или только контент (без layout)
-            // 'ttl' => 86400, // время жизни содержимого в БД, в сек.
-            // 'exclude' => [], // роуты в которых запрещено использование. Можно применять символы ? и *
-            // 'layoutRule' => '*/layouts/*', // маска для определения layout
-            // 'saveOrigContent' => true, // сохранять в БД html
-            // 'saveOrigTitle' => true, // сохранять в БД оригинал заголовока страницы
-            // 'defaultPageSize' => 15, // размер страницы поиска по умолчанию
-            //'on'.\x51\yii2\modules\indexer\Module::EVENT_BEFORE_INDEX => function ($event) {}, // событие перед сохранением страницы в БД
+            /*
+            'fullpageMode' => false, // сохранять всю страницу или только контент (без layout)
+            'ttl' => 86400, // время жизни содержимого в БД, в сек.
+            'exclude' => [], // роуты в которых запрещено использование. Можно применять символы ? и *
+            'layoutRule' => '*/layouts/*', // маска для определения layout
+            'saveOrigContent' => true, // сохранять в БД html
+            'saveOrigTitle' => true, // сохранять в БД оригинал заголовока страницы
+            'defaultPageSize' => 15, // размер страницы поиска по умолчанию
+            'enableHashtags' => true, // обработка хештегов на страницах. они становятся ссылками на поиск
+            'notShowOld' => false, // не показывать старые записи в поиске
+            'on '.\x51\yii2\modules\indexer\Module::EVENT_BEFORE_INDEX => function ($event) {}, // событие перед сохранением страницы в БД
+            'on '.\x51\yii2\modules\indexer\Module::EVENT_BEFORE_SEARCH => function ($event) {}, // событие перед началом поиска
+            */
         ],
     ], // end modules
 ];
@@ -55,6 +60,8 @@ $config = [
 
 События
 -------
+
+### EVENT_BEFORE_INDEX
 
 Событие `\x51\yii2\modules\indexer\Module::EVENT_BEFORE_INDEX` вызывается перед
 сохранением результата в БД.
@@ -72,6 +79,37 @@ $config = [
 -   *model* - модель, подготовленная к сохранению. Эта модель и будет сохранена.
     Можно изменить данные перед сохранением.
 
+### EVENT_BEFORE_SEARCH
+
+Событие `\x51\yii2\modules\indexer\Module::EVENT_BEFORE_SEARCH` вызывается перед
+старта поиска.
+
+В обработчик передается объект типа
+`x51\yii2\modules\indexer\events\BeforeSearchEvent`
+
+В объекте события доступны данные:
+
+-   *module* - ссылка на объект модуля
+
+-   *origSearchStr* - оригинальная строка поиска
+
+-   *preparedSearchStr* - строка, которая будет использоваться в поиске
+
+### EVENT_START_RFRESH_INDEX
+
+Событие `\x51\yii2\modules\indexer\Module::EVENT_START_REFRESH_INDEX` стартует перед началом обновления страницы в базе.
+
+В объекте события доступны данные: 
+
+- *module* - ссылка на текущий модуль
+- *url* - адрес страницы
+- *title* - оригинальный заголовок страницы (не обработанный для поиска)
+- *content* - оригинальный контент  (не обработанный для поиска)
+- *isValid* - true/false - позволяет разрешить/запретить обновление
+
+Данные в объекте события можно модифицировать - именно они будут использованы для обновления. Например, можно убрать контент, которого быть не должно (он лишний при поиске).
+
+
 Методы модуля
 -------------
 
@@ -87,9 +125,13 @@ $config = [
 
 Формирует из url, сохраненного в БД, актуальный url.
 
--   `public function getIndexContent($url)`
+-   `public function getIndex($url)`
 
 По url возвращает сохраненную запись
+
+-   `public function markOld($url)`
+
+Помечает сохраненную страницу как устаревшую.
 
  
 

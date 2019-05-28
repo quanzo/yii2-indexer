@@ -8,4 +8,5 @@ class BeforeSearchEvent extends Event
     public $module;
     public $origSearchStr;
     public $preparedSearchStr;
+	public $role = '';
 } // end class

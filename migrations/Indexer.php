@@ -29,11 +29,13 @@ class Indexer extends Migration {
 			'orig_content' => $this->text(),
 			'snippet' => $this->text(),
 			'attrs' => $this->string(250)->notNull()->defaultValue(''),
+			'role' => $this->string(250)->notNull()->defaultValue(''),
 			'change_date' => $this->timestamp(),
 			'ttl' => $this->timestamp()->defaultValue(null),
         ];
 		$this->createTable('{{%'.$this->baseTableName.'}}', $tblPosts, $tableOptions);
 			$this->createIndex('k_'.$this->baseTableName.'_url', '{{%'.$this->baseTableName.'}}', 'url', true);
+			$this->createIndex('k_'.$this->baseTableName.'_role', '{{%'.$this->baseTableName.'}}', 'role', true);			
 			$this->execute('ALTER TABLE {{%'.$this->baseTableName.'}} ADD FULLTEXT `content` (`title`, `content`);');
 	} // end safeUp
 

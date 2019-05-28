@@ -31,9 +31,9 @@ class Indexer extends \yii\db\ActiveRecord
     {
         return [
             [['content', 'title'], 'required'],
-            [['content', 'orig_content', 'title', 'orig_title', 'attrs', 'snippet'], 'string'],
+            [['content', 'orig_content', 'title', 'orig_title', 'attrs', 'snippet', 'role'], 'string'],
             [['change_date', 'ttl'], 'safe'],
-            [['url', 'attrs'], 'string', 'max' => 250],
+            [['url', 'attrs', 'role'], 'string', 'max' => 250],
         ];
     }
 
@@ -51,6 +51,7 @@ class Indexer extends \yii\db\ActiveRecord
             'orig_content' => Yii::t('module/indexer', 'Content (orig)'),
             'snippet' => Yii::t('module/indexer', 'Snippet'),
             'attrs' => Yii::t('module/indexer', 'Attributes'),
+			'role' => Yii::t('module/indexer', 'Role'),
             'change_date' => Yii::t('module/indexer', 'Change Date'),
             'ttl' => Yii::t('module/indexer', 'Ttl'),
         ];

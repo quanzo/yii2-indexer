@@ -2,15 +2,16 @@
 
 namespace x51\yii2\modules\indexer;
 
-use \DateTime;
 use \x51\yii2\modules\indexer\models\Indexer;
 use \Yii;
+use \DateTime;
 use \yii\helpers\Url;
 
 class Module extends \yii\base\Module
 {
     const EVENT_BEFORE_INDEX = 'beforIndexed';
     const EVENT_BEFORE_SEARCH = 'beforSearch';
+    const EVENT_START_REFRESH_INDEX = 'startRefreshIndex';
 
     public $ttl = 86400;
     public $exclude; // роуты в которых запрещено использование. Можно применять символы ? и *
@@ -25,6 +26,8 @@ class Module extends \yii\base\Module
     public $defaultPageSize = 15;
     public $defaultSnippetSize = 300;
     public $enableHashtags = true; // обрабатывать теги #
+    public $notShowOld = false; // не показывать устаревшие записи
+    public $processIfModifiedSince = true; // отработать If-Modified-Since
 
     /**
      * {@inheritdoc}
@@ -81,6 +84,7 @@ class Module extends \yii\base\Module
         //echo '<pre>';print_r($event->viewFile);echo "\r\n";print_r($event->params);echo '</pre>';
         $request = Yii::$app->request;
         $url = $this->url();
+        $lastModified = $this->getLastModified();
 
         $ifValid = isset($event->params['content']) && $this->ifPossible();
 
@@ -98,11 +102,28 @@ class Module extends \yii\base\Module
         if ($ifValid) {
             $view = Yii::$app->view;
             $title = $view instanceof yii\web\View ? $view->title : '';
-            $this->refresh($this->url(), $title, $event->params['content']);
+            if ($lastModified) {
+                $this->refresh($this->url(), $title, $event->params['content'], $lastModified);
+            } else {
+                $this->refresh($this->url(), $title, $event->params['content']);
+            }
             if ($this->enableHashtags) {
                 $event->output = $this->processHashtags($event->output);
             }
-        }        
+            // отработка заголовка IF_MODIFIED_SINCE
+            if ($lastModified) {
+                $ifModifiedSince = false;
+                if (isset($_ENV['HTTP_IF_MODIFIED_SINCE'])) {
+                    $ifModifiedSince = strtotime(substr($_ENV['HTTP_IF_MODIFIED_SINCE'], 5));
+                } elseif (isset($_SERVER['HTTP_IF_MODIFIED_SINCE'])) {
+                    $ifModifiedSince = strtotime(substr($_SERVER['HTTP_IF_MODIFIED_SINCE'], 5));
+                }
+                if ($ifModifiedSince && $ifModifiedSince >= $lastModified->getTimeStamp()) {
+                    header($_SERVER['SERVER_PROTOCOL'] . ' 304 Not Modified');
+                    exit;
+                }
+            }
+        }
     } // end onAfterRender
 
     /**
@@ -115,17 +136,17 @@ class Module extends \yii\base\Module
     {
         $ifValid = $this->ifPossible();
         $response = $event->sender;
-        if ($ifValid) {            
+        if ($ifValid) {
             if ($response->stream === null) { // отдача контента, а не файла
                 $view = Yii::$app->view;
                 $title = $view instanceof yii\web\View ? $view->title : '';
                 $this->refresh($this->url(), $title, $response->content);
-                if ($this->enableHashtags) { // отдача контента, а не файла
+                if ($this->enableHashtags) {
                     $response->content = $this->processHashtags($response->content);
                 }
             }
         }
-        
+
     } // end onAfterPrepareResponse
 
     /**
@@ -194,7 +215,8 @@ class Module extends \yii\base\Module
      * @param boolean|string $searchStr
      * @return string
      */
-    public function textFragment($content, $count = 300, $searchStr = false) {
+    public function textFragment($content, $count = 300, $searchStr = false)
+    {
         if ($searchStr && $count) {
             // найдем первое вхождение
             $ss_pos = mb_strpos($content, $searchStr);
@@ -207,7 +229,7 @@ class Module extends \yii\base\Module
                 return mb_substr($content, $start, $count);
             }
         }
-        if ($count>0) {
+        if ($count > 0) {
             return mb_substr($content, 0, $count);
         }
         return $content;
@@ -243,41 +265,61 @@ class Module extends \yii\base\Module
      * @param string $notPrepareContent
      * @return void
      */
-    public function refresh($url, $notPreparedTitle, $notPrepareContent)
+    public function refresh($url, $notPreparedTitle, $notPrepareContent, DateTime $refreshChangeDate = null)
     {
-        $query = Indexer::find();
-        $result = $query->where(['url' => $url])->one();
-        $timestamp = time();
-        $ifNeedRefresh = false;
-        if ($result) {
-            $cdt = \DateTime::createFromFormat('Y-m-d H:i:s', $result->change_date);
-            $change_date = $cdt->getTimestamp();
-
-            if ($timestamp > $change_date + $this->ttl) { // обновить
+        // startRefresh
+        $startEvent = new \x51\yii2\modules\indexer\events\StartRefreshIndexEvent();
+        $startEvent->module = $this;
+        $startEvent->url = $url;
+        $startEvent->title = $notPreparedTitle;
+        $startEvent->content = $notPrepareContent;
+        $this->trigger(self::EVENT_START_REFRESH_INDEX, $startEvent);
+        if ($startEvent->isValid) {
+            $query = Indexer::find();
+            $result = $query->where(['url' => $url])->one();
+            $timestamp = time();
+            $ifNeedRefresh = false;
+            if ($result) {
+                $cdt = \DateTime::createFromFormat('Y-m-d H:i:s', $result->change_date);
+                $change_date = $cdt->getTimestamp();
+                if ($refreshChangeDate) { // задана дата
+                    if ($refreshChangeDate->getTimeStamp() != $change_date) {
+                        $ifNeedRefresh = true;
+                    }
+                } else {
+                    if ($timestamp > $change_date + $this->ttl) { // обновить
+                        $ifNeedRefresh = true;
+                    }
+                }
+            } else {
                 $ifNeedRefresh = true;
+                $result = new Indexer();
             }
-        } else {
-            $ifNeedRefresh = true;
-            $result = new Indexer();
-        }
-        if ($ifNeedRefresh) {
-            $result->url = $url;
-            $result->orig_title = $this->saveOrigTitle ? $notPreparedTitle : '';
-            $result->title = $this->prepareContent($notPreparedTitle);
-            $result->orig_content = $this->saveOrigContent ? $notPrepareContent : '';
-            $result->content = $this->prepareContent($notPrepareContent);
-            $result->snippet = $this->prepareSnippet($notPrepareContent, false);
-            $result->attrs = '';
-            $result->ttl = date('Y-m-d H:i:s', $timestamp + $this->ttl);
-            $result->change_date = date('Y-m-d H:i:s', $timestamp);
+            if ($ifNeedRefresh) {
+                $result->url = $url;
+                $result->orig_title = $this->saveOrigTitle ? $startEvent->title : '';
+                $result->title = $this->prepareContent($startEvent->title);
+                $result->orig_content = $this->saveOrigContent ? $startEvent->content : '';
+                $result->content = $this->prepareContent($startEvent->content);
+                $result->snippet = $this->prepareSnippet($startEvent->content, false);
+                $result->attrs = '';
+                $result->role = '';
+                if ($refreshChangeDate) { // задана дата
+                    $result->ttl = date('Y-m-d H:i:s', $refreshChangeDate->getTimeStamp() + $this->ttl);
+                    $result->change_date = date('Y-m-d H:i:s', $refreshChangeDate->getTimeStamp());
+                } else {
+                    $result->ttl = date('Y-m-d H:i:s', $timestamp + $this->ttl);
+                    $result->change_date = date('Y-m-d H:i:s', $timestamp);
+                }
 
-            // beforeIndex
-            $event = new \x51\yii2\modules\indexer\events\BeforeIndexEvent();
-            $event->module = $this;
-            $event->model = $result;
-            $this->trigger(self::EVENT_BEFORE_INDEX, $event);
-            if ($event->isValid) {
-                $event->model->save();
+                // beforeIndex
+                $event = new \x51\yii2\modules\indexer\events\BeforeIndexEvent();
+                $event->module = $this;
+                $event->model = $result;
+                $this->trigger(self::EVENT_BEFORE_INDEX, $event);
+                if ($event->isValid) {
+                    $event->model->save();
+                }
             }
         }
     } // end refresh
@@ -300,7 +342,8 @@ class Module extends \yii\base\Module
      * @param string $url
      * @return void
      */
-    public function markOld($url) {
+    public function markOld($url)
+    {
         $rec = $this->getIndex($url);
         if ($rec) {
             $rec->ttl = date('Y-m-d H:i:s', time() - 1);
@@ -326,6 +369,7 @@ class Module extends \yii\base\Module
         $event->module = $this;
         $event->origSearchStr = $text;
         $event->preparedSearchStr = $this->prepareSearchStr($text);
+        $event->role = '';
         $this->trigger(self::EVENT_BEFORE_SEARCH, $event);
 
         //$searchStr = $this->prepareSearchStr($text);
@@ -349,6 +393,10 @@ class Module extends \yii\base\Module
                 ]
             );
         }
+        if ($this->notShowOld) {
+            $query->andWhere(['>=', 'ttl', date('Y-m-d H:i:s')]);
+        }
+        $query->andWhere(['role' => $event->role]);
         if ($perpage) {
             if ($count === false) {
                 $count = $query->count();
@@ -429,19 +477,19 @@ class Module extends \yii\base\Module
     public function processHashtags($content)
     {
         $mask = '/#([^\b#@\s]+)/';
-        $hashtagUrlPattern = Url::to(['/'.$this->id . '/default/index', 'search' => '#hashtag']);
-        
+        $hashtagUrlPattern = Url::to(['/' . $this->id . '/default/index', 'search' => '#hashtag']);
+
         // первое - найти хештеги в контенте без html (для того, чтобы исключить якоря)
         $arMatches = [];
         $arHashtags = [];
         if (preg_match_all($mask, $this->stripTags($content), $arMatches, PREG_PATTERN_ORDER)) {
-			$arHashtags = array_unique($arMatches[1]);
+            $arHashtags = array_unique($arMatches[1]);
         }
         // 2 - заменить хештеги на ссылку
         if ($arHashtags) {
             $arReplaceParts = [];
             foreach ($arHashtags as $ht) {
-                $arReplaceParts['#'.$ht] = '<a target="_blank" href="' . str_replace('%23hashtag', urlencode(strip_tags(trim('#'.$ht))), $hashtagUrlPattern) . '" class="hashtag">#' . trim($ht) . '</a> ';
+                $arReplaceParts['#' . $ht] = '<a target="_blank" href="' . str_replace('%23hashtag', urlencode(strip_tags(trim('#' . $ht))), $hashtagUrlPattern) . '" class="hashtag">#' . trim($ht) . '</a> ';
             }
             return strtr($content, $arReplaceParts);
         }
@@ -459,7 +507,12 @@ class Module extends \yii\base\Module
         $url = '/' . Yii::$app->controller->route;
         $qString = $request->queryString;
         if ($qString) {
-            $url .= '?' . $qString;
+            $arParams = [];
+            parse_str($qString, $arParams);
+            unset($arParams['r']);
+            if ($arParams) {
+                $url .= '?' . http_build_query($arParams);
+            }
         }
         //$url = $request->url;
         return $url;
@@ -505,6 +558,20 @@ class Module extends \yii\base\Module
         return false;
     } // end ifPossible
 
-    
+    protected function getLastModified() {
+        if (function_exists('headers_list')) {
+            $arHeaders = headers_list();
+            foreach ($arHeaders as $header) {
+                if (strpos($header, 'Last-Modified:') === 0) {
+                    try {
+                        return DateTime::createFromFormat('D, d M Y H:i:s \G\M\T', trim(substr($header, 14)));
+                    } catch (\Exception $e) {
+                        return false;
+                    }                    
+                }
+            }            
+        }
+        return false;        
+    }
 
 } // end class

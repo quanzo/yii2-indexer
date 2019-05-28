@@ -51,7 +51,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     echo '<div class="snippet">';
                     echo $module->prepareSnippet($element->orig_content, $module->defaultSnippetSize, $SEARCH).'...';
                     echo '<a href="'.$module->actualUrl($element->url).'" target="_blank" class="more">';
-                    echo 'Подробнее';
+                    echo Yii::t('module/indexer', 'More');
                     echo '</a>';
                     echo '</div>';
                     
@@ -63,7 +63,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     echo LinkPager::widget(['pagination' => $PAGES]);
                 }
             } else { // ничего не найдено
-                echo '<div class="not-found">'.Yii::t('module/indexer', 'Not found').'</div>';
+                echo '<div class="not-found">'.Yii::t('module/indexer', 'No result found').'</div>';
             }
     ?>
     <?php } ?>
