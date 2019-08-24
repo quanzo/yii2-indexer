@@ -49,7 +49,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     }                    
                     echo '</a>';
                     echo '<div class="snippet">';
-                    echo $module->prepareSnippet($element->orig_content, $module->defaultSnippetSize, $SEARCH).'...';
+                    echo $module->prepareSnippet($element->orig_content, $module->defaultSnippetSize, ($module->snippetFromBegin ? false : $SEARCH)).'...';
                     echo '<a href="'.$module->actualUrl($element->url).'" target="_blank" class="more">';
                     echo Yii::t('module/indexer', 'More');
                     echo '</a>';

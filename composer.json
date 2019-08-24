@@ -1,0 +1,26 @@
+{
+    "name": "quanzo/yii2-indexer",
+    "description": "Indexed content site and search. Module for Yii 2",
+	"version": "1.0.0",
+    "authors": [
+        {
+            "name": "Quanzo",
+            "email": "iquanzo@gmail.com"
+        }
+    ],
+    "keywords": [
+        "yii2",
+        "recaptcha"
+    ],
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": ">=7.0",
+        "yiisoft/yii2": "~2.0.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "x51\\yii2\\modules\\indexer\\": ""
+        }
+    }
+}

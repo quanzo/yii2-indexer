@@ -2,9 +2,9 @@
 
 namespace x51\yii2\modules\indexer;
 
+use \DateTime;
 use \x51\yii2\modules\indexer\models\Indexer;
 use \Yii;
-use \DateTime;
 use \yii\helpers\Url;
 
 class Module extends \yii\base\Module
@@ -14,20 +14,24 @@ class Module extends \yii\base\Module
     const EVENT_START_REFRESH_INDEX = 'startRefreshIndex';
 
     public $ttl = 86400;
-    public $exclude; // роуты в которых запрещено использование. Можно применять символы ? и *
+    public $exclude; // роуты в которых запрещено использование. Можно применять символы ? и * Или задать callback
     public $layoutRule = '*/layouts/*';
     public $saveOrigContent = true;
     public $saveOrigTitle = true;
-    protected $_removeWords = [
+    protected $_removeWords = [ // слова для удаления из поискового контента
         /*'из', 'в', 'под', 'если', 'то', 'из',
-    'что', 'c', 'и'*/
+    'что', 'c', 'и', 'подробнее'*/
+    ];
+    protected $_queryRemoveParams = [ // параметры для удаления из адреса страницы
+        'r', '_pjax', 'ajax'
     ];
     public $fullpageMode = false;
     public $defaultPageSize = 15;
     public $defaultSnippetSize = 300;
+    public $snippetFromBegin = true;
     public $enableHashtags = true; // обрабатывать теги #
     public $notShowOld = false; // не показывать устаревшие записи
-    public $processIfModifiedSince = true; // отработать If-Modified-Since
+    public $processIfModifiedSince = true; // отработать If-Modified-Since. При индексировании, ищет http заголовок с датой документа и использует ее в индексировании.
 
     /**
      * {@inheritdoc}
@@ -70,6 +74,16 @@ class Module extends \yii\base\Module
     public function getRemoveWords()
     {
         return $this->_removeWords;
+    }
+
+    public function setQueryRemoveParams(array $words)
+    {
+        $this->_queryRemoveParams = $words;
+    }
+
+    public function getQueryRemoveParams()
+    {
+        return $this->_queryRemoveParams;
     }
 
     /**
@@ -476,23 +490,80 @@ class Module extends \yii\base\Module
      */
     public function processHashtags($content)
     {
-        $mask = '/#([^\b#@\s]+)/';
+        $mask = '/#([^\b#@<>\/"\'\s]+)/u';
         $hashtagUrlPattern = Url::to(['/' . $this->id . '/default/index', 'search' => '#hashtag']);
+
+        //preg_replace_callback()
+
+        $startOffsetPos = 0;
+        $bodyPos = mb_stripos($content, '<body');
+        if ($bodyPos !== false) {
+            $startOffsetPos = $bodyPos;
+        }
+        $offsetPos = $startOffsetPos;
 
         // первое - найти хештеги в контенте без html (для того, чтобы исключить якоря)
         $arMatches = [];
         $arHashtags = [];
-        if (preg_match_all($mask, $this->stripTags($content), $arMatches, PREG_PATTERN_ORDER)) {
-            $arHashtags = array_unique($arMatches[1]);
+        if (preg_match_all($mask, $content, $arMatches, PREG_OFFSET_CAPTURE)) {
+            // хеш теги есть
+            $contentSize = strlen($content);
+
+            // проверим совпадения на корректность
+            $arIgnored = [];
+            foreach ([
+                ['href="', '"'],
+                ['<script', '</script>'],
+                ['<style', '</style>'],
+                ['<', '>']
+            ] as $part) {
+                for ($i = 0; $i < sizeof($arMatches[0]); $i++) {
+                    if (!isset($arIgnored[$i]) || !$arIgnored[$i]) {
+                        $matchPos = $arMatches[0][$i][1];
+                        $matchPosNegative = ($contentSize - $matchPos - 1) * -1;
+                        $tag = $arMatches[1][$i][0];
+                        //echo "tag = $tag matchPos = $matchPos $matchPosNegative";
+                        $ignore = $matchPos < $startOffsetPos;
+                        if (!$ignore) { // проверка на якорь ссылки
+                            $p1 = strripos($content, $part[0], $matchPosNegative);
+                            //echo "p1 = $p1\r\n<br>";
+                            if ($p1 !== false) {
+                                $p2 = strpos($content, $part[1], $p1 + strlen($part[0]));
+                                //echo "p2 = $p2\r\n<br>";
+
+                                $ignore = $matchPos < $p2;
+                                //echo mb_substr($content, $p1, 82)."<br>";
+                            }
+                        }
+                        $arIgnored[$i] = $ignore;
+                    }
+                }
+            }
+            //var_dump($arIgnored);
+
+            $matchesCounter = 0;
+
+            return preg_replace_callback($mask, function ($repMatches) use ($arIgnored, &$matchesCounter, $hashtagUrlPattern) {
+                $ignore = $arIgnored[$matchesCounter];
+
+                ++$matchesCounter;
+                if ($ignore) {
+                    return $repMatches[0];
+                } else {
+                    return '<a target="_blank" href="' . str_replace('%23hashtag', urlencode(strip_tags(trim('#' . $repMatches[1]))), $hashtagUrlPattern) . '" class="hashtag">#' . trim($repMatches[1]) . '</a> ';
+                }
+            }, $content);
+
+            //$arHashtags = array_unique($arMatches[1]);
         }
         // 2 - заменить хештеги на ссылку
-        if ($arHashtags) {
-            $arReplaceParts = [];
-            foreach ($arHashtags as $ht) {
-                $arReplaceParts['#' . $ht] = '<a target="_blank" href="' . str_replace('%23hashtag', urlencode(strip_tags(trim('#' . $ht))), $hashtagUrlPattern) . '" class="hashtag">#' . trim($ht) . '</a> ';
-            }
-            return strtr($content, $arReplaceParts);
+        /*if ($arHashtags) {
+        $arReplaceParts = [];
+        foreach ($arHashtags as $ht) {
+        $arReplaceParts['#' . $ht] = '<a target="_blank" href="' . str_replace('%23hashtag', urlencode(strip_tags(trim('#' . $ht))), $hashtagUrlPattern) . '" class="hashtag">#' . trim($ht) . '</a> ';
         }
+        return strtr($content, $arReplaceParts);
+        }*/
         return $content;
     } // end processTags
 
@@ -509,7 +580,11 @@ class Module extends \yii\base\Module
         if ($qString) {
             $arParams = [];
             parse_str($qString, $arParams);
-            unset($arParams['r']);
+            if ($this->_queryRemoveParams) {
+                foreach ($this->_queryRemoveParams as $p) {
+                    unset($arParams[$p]);
+                }
+            }            
             if ($arParams) {
                 $url .= '?' . http_build_query($arParams);
             }
@@ -558,7 +633,8 @@ class Module extends \yii\base\Module
         return false;
     } // end ifPossible
 
-    protected function getLastModified() {
+    protected function getLastModified()
+    {
         if (function_exists('headers_list')) {
             $arHeaders = headers_list();
             foreach ($arHeaders as $header) {
@@ -567,11 +643,11 @@ class Module extends \yii\base\Module
                         return DateTime::createFromFormat('D, d M Y H:i:s \G\M\T', trim(substr($header, 14)));
                     } catch (\Exception $e) {
                         return false;
-                    }                    
+                    }
                 }
-            }            
+            }
         }
-        return false;        
+        return false;
     }
 
 } // end class
