@@ -1,5 +1,4 @@
 <?php
-
 namespace x51\yii2\modules\indexer;
 
 use \DateTime;
