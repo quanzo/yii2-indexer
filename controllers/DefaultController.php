@@ -27,8 +27,10 @@ class DefaultController extends Controller
         $currPage = !empty($params[$pageParam]) ? intval($params[$pageParam]) : 1;
 
         if ($request->isPost) {
-            $search = $request->post('search');
-        }
+            $search = $request->post('search');            
+        }/* else {
+            $request->getOrigin();
+        }*/
         if ($search) {
             $searchResult = $this->module->search($search, $currPageSize, $currPage, $totalCount);
             $PAGES = new Pagination([
